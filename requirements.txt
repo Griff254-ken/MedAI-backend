@@ -2,17 +2,15 @@
 # Core Web Framework
 # =========================
 fastapi==0.110.0
-# Combined into one line to avoid the version conflict
 uvicorn[standard]==0.30.0
 python-multipart==0.0.9
 
 # =========================
-# AI / Deep Learning (CPU-only)
+# AI / Deep Learning (CPU-optimized)
 # =========================
-# Using --index-url in Render's build command is better, 
-# but for the file, we keep these compatible:
-torch==2.5.1 --index-url https://download.pytorch.org/whl/cpu
-torchvision==0.20.1 --index-url https://download.pytorch.org/whl/cpu
+# We remove exact versions here so Render can resolve the best CPU match
+torch
+torchvision
 numpy==1.26.4
 
 # =========================
