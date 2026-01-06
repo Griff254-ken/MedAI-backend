@@ -2,26 +2,23 @@
 # Core Web Framework
 # =========================
 fastapi==0.110.0
-uvicorn[standard]==0.29.0
-uvicorn==0.30.0
+# Combined into one line to avoid the version conflict
+uvicorn[standard]==0.30.0
 python-multipart==0.0.9
 
 # =========================
-# AI / Deep Learning (CPU-only, Python 3.11)
+# AI / Deep Learning (CPU-only)
 # =========================
-torch==2.5.1
-torchvision==0.2.2
+# Using --index-url in Render's build command is better, 
+# but for the file, we keep these compatible:
+torch==2.5.1 --index-url https://download.pytorch.org/whl/cpu
+torchvision==0.20.1 --index-url https://download.pytorch.org/whl/cpu
 numpy==1.26.4
 
 # =========================
-# Image Processing
+# Image Processing & DB
 # =========================
 pillow==10.1.0
-
-
-# =========================
-# Database (MongoDB)
-# =========================
 motor==3.3.2
 pymongo==4.6.1
 
@@ -30,4 +27,3 @@ pymongo==4.6.1
 # =========================
 python-dotenv==1.0.1
 loguru==0.7.2
-
