@@ -8,9 +8,9 @@ python-multipart==0.0.9
 # =========================
 # AI / Deep Learning (CPU-optimized)
 # =========================
-# We remove exact versions here so Render can resolve the best CPU match
-torch
-torchvision
+--find-links https://download.pytorch.org/whl/cpu/torch_stable.html
+torch==2.2.0+cpu
+torchvision==0.17.0+cpu
 numpy==1.26.4
 
 # =========================
