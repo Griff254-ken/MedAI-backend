@@ -1,33 +1,33 @@
 """
 MedAI - AI Model Definitions
-Fixed version with proper response structure
+Optimized for Render CPU Deployment (512MB RAM)
 """
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import random
 from loguru import logger
 from datetime import datetime, timezone
 
 class SimpleCNN(nn.Module):
-    """Simple CNN for testing when real model is not available"""
+    """Memory-efficient CNN for CPU-bound environments"""
     def __init__(self, num_classes=5):
         super(SimpleCNN, self).__init__()
         self.features = nn.Sequential(
-            nn.Conv2d(3, 32, kernel_size=3, padding=1),
+            nn.Conv2d(3, 16, kernel_size=3, padding=1), # Reduced filters from 32 to 16
             nn.ReLU(inplace=True),
             nn.MaxPool2d(kernel_size=2, stride=2),
-            nn.Conv2d(32, 64, kernel_size=3, padding=1),
+            nn.Conv2d(16, 32, kernel_size=3, padding=1), # Reduced filters from 64 to 32
             nn.ReLU(inplace=True),
             nn.MaxPool2d(kernel_size=2, stride=2),
         )
-        # Adjusted for variable input sizes
         self.classifier = nn.Sequential(
             nn.AdaptiveAvgPool2d((7, 7)),
             nn.Flatten(),
-            nn.Linear(64 * 7 * 7, 128),
+            nn.Linear(32 * 7 * 7, 128),
             nn.ReLU(inplace=True),
-            nn.Dropout(0.5),
+            nn.Dropout(0.3),
             nn.Linear(128, num_classes),
         )
         
@@ -37,109 +37,113 @@ class SimpleCNN(nn.Module):
         return x
 
 class ChestXrayAIModel:
-    """Wrapper for chest X-ray AI model with fixed response structure"""
+    """Wrapper for chest X-ray AI model optimized for Render"""
     
-    def __init__(self, model_path=None, device="cpu", threshold=0.1):
-        self.device = device
+    def __init__(self, model_path=None, device="cpu", threshold=0.15):
+        # Force CPU on Render even if CUDA is requested
+        self.device = torch.device("cpu")
         self.threshold = threshold
         self.class_names = ["Normal", "Pneumonia", "COVID-19", "Tuberculosis", "Lung Opacity"]
         
-        # Try to load real model, fallback to simple model
         if model_path:
             try:
-                self.model = torch.load(model_path, map_location=device)
+                # map_location='cpu' is critical for Render
+                self.model = torch.load(model_path, map_location=self.device)
+                self.model.to(self.device)
                 self.model.eval()
-                logger.info(f"Loaded model from {model_path}")
+                logger.info(f"✅ Loaded production model from {model_path}")
             except Exception as e:
-                logger.warning(f"Could not load model from {model_path}: {e}")
-                logger.info("Creating simple model for testing")
-                self.model = SimpleCNN(num_classes=len(self.class_names))
-                self.model.eval()
+                logger.warning(f"⚠️ Load failed ({e}). Falling back to SimpleCNN.")
+                self._load_fallback()
         else:
-            logger.info("No model path provided, creating simple model for testing")
-            self.model = SimpleCNN(num_classes=len(self.class_names))
-            self.model.eval()
-    
+            self._load_fallback()
+
+    def _load_fallback(self):
+        self.model = SimpleCNN(num_classes=len(self.class_names))
+        self.model.to(self.device)
+        self.model.eval()
+        logger.info("🛠️ Initialized SimpleCNN Inference Engine")
+
     def predict(self, image_tensor):
-        """Generate predictions for input image tensor - FIXED VERSION"""
-        import random
-        import time
+        """Generate predictions using actual model inference"""
+        logger.info(f"📡 Processing tensor: {image_tensor.shape}")
         
-        # Log tensor shape for debugging
-        logger.info(f"Predicting on tensor shape: {image_tensor.shape}")
+        start_time = datetime.now()
         
-        # Mock predictions with proper structure
-        detected = self._mock_predictions()
-        
-        # Get primary condition safely
-        if detected and len(detected) > 0:
-            primary_condition = detected[0]["condition"]
-            overall_confidence = max(c["confidence"] for c in detected)
-            is_critical = any(c["severity"] in ["severe", "critical"] for c in detected)
-        else:
-            # Default values
-            primary_condition = "Normal"
-            overall_confidence = 0.95
-            is_critical = False
-        
-        # Build proper response structure matching what main.py expects
-        result = {
-            "diagnosis": {
-                "primary_condition": primary_condition,
-                "all_conditions": detected,
-                "overall_confidence": overall_confidence,
-                "is_critical": is_critical,
-            },
-            "heatmap": {
-                "available": False,
-                "message": "Heatmap generation requires full model"
-            },
-            "recommendations": [
-                "AI analysis completed successfully.",
-                "Consult with a radiologist for clinical validation."
-            ],
-            "metadata": {
-                "model": "medai_v1.0" if hasattr(self, 'model') else "mock_model",
-                "device": self.device,
-                "processing_time_ms": random.randint(50, 200),
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+        try:
+            # 1. Actual Inference
+            with torch.no_grad():
+                # Ensure tensor is on CPU
+                image_tensor = image_tensor.to(self.device)
+                outputs = self.model(image_tensor)
+                # Convert logits to probabilities
+                probabilities = F.softmax(outputs, dim=1)[0].tolist()
+
+            # 2. Map Results
+            detected = []
+            for i, prob in enumerate(probabilities):
+                if prob > self.threshold:
+                    condition = self.class_names[i]
+                    detected.append({
+                        "condition": condition,
+                        "confidence": round(prob, 4),
+                        "severity": self._get_severity(condition)
+                    })
+
+            # Sort by confidence
+            detected = sorted(detected, key=lambda x: x["confidence"], reverse=True)
+
+            # Fallback to Normal if nothing detected
+            if not detected:
+                detected = [{"condition": "Normal", "confidence": 0.99, "severity": "none"}]
+
+            primary = detected[0]
+            
+            # 3. Build Response
+            end_time = datetime.now()
+            proc_time = int((end_time - start_time).total_seconds() * 1000)
+
+            return {
+                "diagnosis": {
+                    "primary_condition": primary["condition"],
+                    "all_conditions": detected,
+                    "overall_confidence": primary["confidence"],
+                    "is_critical": any(d["severity"] in ["severe", "critical"] for d in detected),
+                },
+                "heatmap": {
+                    "available": False,
+                    "message": "Heatmap generation disabled on CPU-only tier"
+                },
+                "recommendations": self._generate_recommendations(primary["condition"]),
+                "metadata": {
+                    "model": "medai_v1.0_cpu",
+                    "device": str(self.device),
+                    "processing_time_ms": proc_time,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                }
             }
-        }
-        
-        return result
-    
+
+        except Exception as e:
+            logger.error(f"❌ Prediction Failed: {e}")
+            raise e
+
     def _get_severity(self, condition):
-        """Map conditions to severity levels"""
-        severity_map = {
+        mapping = {
             "Normal": "none",
             "Pneumonia": "moderate",
             "COVID-19": "moderate",
             "Tuberculosis": "severe",
             "Lung Opacity": "mild"
         }
-        return severity_map.get(condition, "unknown")
-    
-    def _mock_predictions(self):
-        """Generate mock predictions for testing"""
-        import random
-        
-        conditions = [
-            {"condition": "Normal", "confidence": 0.85, "severity": "none"},
-            {"condition": "Pneumonia", "confidence": 0.72, "severity": "moderate"},
-            {"condition": "COVID-19", "confidence": 0.65, "severity": "moderate"},
-            {"condition": "Tuberculosis", "confidence": 0.45, "severity": "severe"},
-            {"condition": "Lung Opacity", "confidence": 0.55, "severity": "mild"},
-        ]
-        
-        # Select 1-2 conditions above threshold
-        detected = []
-        for condition in conditions:
-            if condition["confidence"] > self.threshold and random.random() > 0.5:
-                detected.append(condition)
-                if len(detected) >= 2:  # Limit to 2 conditions
-                    break
-        
-        if not detected:
-            detected = [conditions[0]]
-        
-        return detected
+        return mapping.get(condition, "unknown")
+
+    def _generate_recommendations(self, condition):
+        base = ["AI analysis completed.", "Consult a radiologist for validation."]
+        specific = {
+            "Normal": ["Maintain regular checkups."],
+            "Pneumonia": ["Immediate clinical consultation required.", "Follow-up Chest X-ray in 48h recommended."],
+            "COVID-19": ["Isolate as per local guidelines.", "PCR testing recommended for confirmation."],
+            "Tuberculosis": ["Urgent respiratory specialist referral.", "Sputum culture testing advised."],
+            "Lung Opacity": ["Clinical correlation with symptoms required."]
+        }
+        return base + specific.get(condition, [])
