@@ -8,8 +8,8 @@ python-multipart==0.0.9
 # =========================
 # AI / Deep Learning (CPU-only, Python 3.11)
 # =========================
-torch==2.1.2
-torchvision==0.16.2
+torch==2.5.1
+torchvision==0.20.0
 numpy==1.26.4
 
 # =========================
@@ -28,3 +28,4 @@ pymongo==4.6.1
 # =========================
 python-dotenv==1.0.1
 loguru==0.7.2
+
